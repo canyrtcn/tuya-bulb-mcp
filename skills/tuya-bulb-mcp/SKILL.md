@@ -71,4 +71,4 @@ Result shape: `{success, changed, verified?, reason?, verification?, dps_written
 
 ## Setup / wiring (only if asked)
 
-See `README.md` (setup commands for Windows/Linux/macOS, MCP client config) and `AGENTS.md` (step-by-step agent instructions). The CLI wizard `setup_wizard.py` creates the `.env` and performs a read-only verification.
+See `README.md` for step-by-step setup on Windows/Linux/macOS, MCP client configuration, tool usage and troubleshooting. The CLI wizard `setup_wizard.py` creates the `.env` and performs read-only device verification.

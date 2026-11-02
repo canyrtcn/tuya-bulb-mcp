@@ -167,24 +167,6 @@ Verification uses ACK or fresh status where appropriate. An unverified write is 
 - On Windows, .env inherits its directory ACLs. Keep installation in a user-only folder and review permissions on shared machines.
 - If tools are absent, check venv and client paths, MCP configuration and reload/restart.
 
-### Offline tests (no physical bulb required)
-
-After installing dependencies into the virtual environment, run:
-
-**Windows:**
-
-~~~powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-~~~
-
-**Linux / macOS:**
-
-~~~bash
-.venv/bin/python -m unittest discover -s tests -v
-~~~
-
-These tests use simulated devices and do not control a real bulb. The [CI workflow](https://github.com/canyrtcn/tuya-bulb-mcp/actions) runs them on Windows and Ubuntu using Python 3.10 and 3.12. Passing offline tests does not guarantee compatibility with every bulb; perform a controlled, read-only device check before any hardware writes.
-
 ## Project layout
 
 - tuya_bulb_mcp_server.py — stdio MCP server
@@ -192,8 +174,6 @@ These tests use simulated devices and do not control a real bulb. The [CI workfl
 - tuya_config.py — shared, minimal `.env` parser
 - baseline_state.example.json — sample snapshot format (not real device state)
 - skills/tuya-bulb-mcp/SKILL.md — optional agent guidance
-- AGENTS.md and CLAUDE.md — contributor safety instructions
-- tests/ — offline regression tests
 
 ## Credits and license
 
