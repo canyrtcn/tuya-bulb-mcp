@@ -2,7 +2,7 @@
 
 Local MCP server for Tuya / Smart Life Wi-Fi lighting. Connect an MCP-compatible AI client to a bulb directly over your local network with [TinyTuya](https://github.com/jasonacox/tinytuya). No Tuya Cloud calls are needed at runtime.
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE) ![MCP: stdio](https://img.shields.io/badge/MCP-stdio-blue) ![TinyTuya](https://img.shields.io/badge/TinyTuya-1.20-00A98F) ![Cloud](https://img.shields.io/badge/cloud-not%20required-success) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE) ![MCP: stdio](https://img.shields.io/badge/MCP-stdio-blue) ![TinyTuya](https://img.shields.io/badge/TinyTuya-1.20-00A98F) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 
 ## Features
 
