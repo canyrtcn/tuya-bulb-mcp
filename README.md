@@ -13,7 +13,7 @@ Local MCP server for Tuya / Smart Life Wi-Fi lighting. Connect an MCP-compatible
 - Idempotent requests return an already-set result without redundant writes.
 - Interactive setup, read-only device compatibility verification, and a local baseline.
 
-**Compatibility:** The DP20–24 mapping is designed for compatible Tuya bulbs using the light_ty firmware family. Other firmware mappings may require an adapted implementation.
+**Compatibility:** This implementation is built for a single compatible Tuya `light_ty` bulb with the DP20–24 mapping. It is not a generic Tuya device controller. Firmware and datapoint layouts vary; read-only verification is required before any physical writes.
 
 ## Requirements
 
@@ -21,7 +21,9 @@ Local MCP server for Tuya / Smart Life Wi-Fi lighting. Connect an MCP-compatible
 - Bulb paired in Smart Life / Tuya and accessible from this computer on the LAN
 - Device ID, local IPv4 address, protocol version (3.3 or 3.4) and 16-character local key
 
-The local key can be obtained through the [Tuya IoT Platform](https://iot.tuya.com) after creating a project and linking your Smart Life account. Cloud access may be required to obtain the key, but is not required for runtime control.
+The local key can be obtained through the [Tuya IoT Platform](https://iot.tuya.com) after creating a project and linking your Smart Life account. Locate the bulb under the linked project's devices and retrieve its device ID and local key. The local IPv4 address and protocol version can be found through LAN discovery or your router. Tuya's cloud interface and credential retrieval requirements can change. Cloud access may be required to obtain the key, but is not required for runtime control.
+
+**Before starting:** Keep the bulb powered and reachable on the same LAN, and have its device ID and 16-character local key available. Do not paste the key into chat, a GitHub issue or a client MCP configuration.
 
 ## Quick start
 
@@ -45,7 +47,7 @@ python3 -m venv .venv
 .venv/bin/python setup_wizard.py --scan
 ~~~
 
-The scan is optional. If it finds nothing, run the wizard without --scan and enter the device details manually. Network isolation may prevent discovery.
+The scan is optional. If it finds nothing, run the wizard without `--scan` and enter the device details manually. Network isolation may prevent discovery. The wizard prompts for the local key securely when run interactively; it never needs the key as a command-line argument.
 
 The wizard:
 
@@ -54,7 +56,7 @@ The wizard:
 3. Captures the initial state and device identity into Git-ignored baseline_state.json if no baseline exists.
 4. Saves the Git-ignored .env with an optional identity guard **only after successful verification**.
 
-It does not overwrite an existing baseline. A different-device or legacy baseline without an identity must be backed up and manually removed before creating a new one. To migrate a legacy baseline safely, rename `baseline_state.json` to `baseline_state.backup.json` in the local project directory, then run the wizard again with the same configured device; the new baseline will be captured from a fresh read-only status response. An incompatible or unreachable bulb leaves the previous .env unchanged. If the bulb is in scene/music mode, switch to white/colour in the app before setup. The --no-verify option bypasses verification and still saves configuration; do not use state-changing tools before confirming compatibility.
+It does not overwrite an existing baseline. A different-device or legacy baseline without an identity must be backed up and manually removed before creating a new one. To migrate a legacy baseline safely, rename `baseline_state.json` to `baseline_state.backup.json` in the local project directory, then run the wizard again with the same configured device; the new baseline will be captured from a fresh read-only status response. Both filenames are Git-ignored. Do not copy an old device's baseline into a new device installation. An incompatible or unreachable bulb leaves the previous .env unchanged. If the bulb is in scene/music mode, switch to white/colour in the app before setup. The --no-verify option bypasses verification and still saves configuration; do not use state-changing tools before confirming compatibility.
 
 The network scan may create an ignored snapshot.json file. Avoid the separate TinyTuya wizard here because it can persist additional credentials in local files. Never share the local key in chat or version control.
 
@@ -84,7 +86,7 @@ mcp_servers:
     timeout: 120
 ~~~
 
-Use the venv bin/python on Linux/macOS. In Hermes, run /reload-mcp after changing config, and check with hermes mcp test tuya-bulb.
+Use the venv `bin/python` on Linux/macOS. In Hermes, run `/reload-mcp` after changing config, and check with `hermes mcp test tuya-bulb`. Only edit or reload a client's configuration when you explicitly intend to change that installation; testing a separate checkout does not require editing an existing MCP registration.
 
 **Claude Desktop or other stdio clients:**
 
@@ -131,7 +133,8 @@ Verification uses ACK or fresh status where appropriate. An unverified write is 
 
 ## Safety and troubleshooting
 
-- Keep .env, baseline_state.json and scan/credential files out of Git.
+- Keep `.env`, `baseline_state.json`, and scan/credential files out of Git. The `.gitignore` also covers dated scan dumps and `baseline_state.backup.json`, but ignore rules do not protect against explicitly forced commits; inspect `git status` before publishing.
+- Never paste a device local key into public bug reports or screenshots. If a key is exposed, rotate it through the device's supported pairing flow.
 - No arbitrary datapoint write tool is provided; only DP20–24 are written. DP25/26/34 are not modified.
 - Device compatibility must be checked before writing; optional identity guard prevents misconfigured targets.
 - If scanning fails, check Wi-Fi isolation and router device listings.
@@ -141,9 +144,23 @@ Verification uses ACK or fresh status where appropriate. An unverified write is 
 - On Windows, .env inherits its directory ACLs. Keep installation in a user-only folder and review permissions on shared machines.
 - If tools are absent, check venv and client paths, MCP configuration and reload/restart.
 
-Run offline regression checks with: `python -m unittest discover -s tests -v`
+### Offline tests (no physical bulb required)
 
-Hardware integration should be reviewed and tested separately before public release; offline regression tests use fake devices only.
+After installing dependencies into the virtual environment, run:
+
+**Windows:**
+
+~~~powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+~~~
+
+**Linux / macOS:**
+
+~~~bash
+.venv/bin/python -m unittest discover -s tests -v
+~~~
+
+These tests use simulated devices and do not control a real bulb. The CI workflow runs them on Windows and Ubuntu using Python 3.10 and 3.12. Passing offline tests does not guarantee compatibility with every bulb; perform a controlled, read-only device check before any hardware writes.
 
 ## Project layout
 

@@ -2,16 +2,21 @@
 .env
 .env.*
 !.env.example
-devices.json
-snapshot.json
-tinytuya.json
-tuya-credentials.json
-tuya-raw.json
+# TinyTuya discovery and credential dumps, including dated copies
+devices.json*
+snapshot.json*
+tinytuya.json*
+tuya-credentials.json*
+tuya-raw.json*
 *.key
 *.pem
 
-# Local device state
-baseline_state.json
+# Local device state and safety backups
+baseline_state*.json
+!baseline_state.example.json
+*.backup.json
+*.orig
+*.old
 
 # Local helpers and backups
 get_local_key.py

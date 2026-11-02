@@ -249,6 +249,15 @@ def _power_action(want_on):
             result["note"] = "NO write was sent"
             return result
         result["precheck_unavailable"] = True
+    if pre is not None and (
+        not all(dp in pre for dp in ("20", "21", "22", "23", "24"))
+        or not isinstance(pre["21"], str)
+        or any(type(pre[dp]) is not int for dp in ("22", "23"))
+        or _decode_colour(pre["24"]) is None
+    ):
+        result["error"] = "Unsupported device DP scheme (requires DP20–24)."
+        result["note"] = "NO write was sent"
+        return result
     if pre is not None and pre.get("20") == wanted:
         result.update({"success": True, "changed": False, "reason": "already_set",
                        "verified": True, "power": "on" if wanted else "off"})

@@ -3,6 +3,8 @@ import contextlib
 import importlib.util
 import io
 import json
+import shutil
+import subprocess
 import os
 from pathlib import Path
 import sys
@@ -356,6 +358,14 @@ class ServerTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(self.bulb.writes, [])
 
+    def test_power_rejects_incomplete_dp20_layout(self):
+        self.bulb = FakeBulb(status={"20": True})
+        ns = self.server()
+        result = ns["tuya_bulb_turn_off"]()
+        self.assertFalse(result["success"])
+        self.assertIn("Unsupported device DP scheme", result["error"])
+        self.assertEqual(self.bulb.writes, [])
+
     def test_non_dictionary_status_does_not_crash(self):
         ns = self.server()
         class Broken:
@@ -571,6 +581,56 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.bulb.calls, 1)
         self.assertFalse(self.bulb.writes)
         sleep.assert_not_called()
+
+
+
+class PackagingTests(unittest.TestCase):
+    """Guard against accidentally committing local device credentials/state."""
+
+    @unittest.skipUnless(shutil.which("git") and (ROOT / ".git").exists(), "Git is required for ignore-rule verification")
+    def test_local_state_backups_are_ignored(self):
+        sensitive_paths = (
+            ".env",
+            ".env.old",
+            "baseline_state.json",
+            "baseline_state.backup.json",
+            "baseline_state.2026-11-02.json",
+            "devices.json",
+            "devices.json.2026-11-02",
+            "snapshot.json.old",
+            "tuya-credentials.json.backup",
+            "tinytuya.json",
+        )
+        for filename in sensitive_paths:
+            with self.subTest(filename=filename):
+                result = subprocess.run(
+                    ["git", "check-ignore", "--no-index", "-q", filename],
+                    cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, filename)
+
+        for public_example in (".env.example", "baseline_state.example.json"):
+            with self.subTest(public_example=public_example):
+                result = subprocess.run(
+                    ["git", "check-ignore", "--no-index", "-q", public_example],
+                    cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 1, public_example)
+
+    @unittest.skipUnless(shutil.which("git") and (ROOT / ".git").exists(), "Git is required for tracked-file audit")
+    def test_no_sensitive_state_files_are_tracked(self):
+        result = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=ROOT, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, check=True,
+        )
+        tracked = set(result.stdout.decode("utf-8").strip("\0").split("\0"))
+        for forbidden in (
+            ".env", "baseline_state.json", "baseline_state.backup.json",
+            "devices.json", "tinytuya.json", "snapshot.json",
+        ):
+            self.assertNotIn(forbidden, tracked)
 
 
 if __name__ == "__main__":
