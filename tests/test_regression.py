@@ -451,7 +451,7 @@ class ServerTests(unittest.TestCase):
     def test_set_state_rejects_scene_mode(self):
         self.bulb.dps["21"] = "scene"
         ns = self.server()
-        result = ns["tuya_bulb_set_state"](brightness=50)
+        result = ns["tuya_bulb_set_state"](brightness=60)
         self.assertFalse(result["success"])
         self.assertEqual(self.bulb.writes, [])
 
