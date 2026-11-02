@@ -67,7 +67,7 @@ Result shape: `{success, changed, verified?, reason?, verification?, dps_written
 - **Multi-DP ACKs are partial** (often only the first dp is echoed). Never treat a partial ACK alone as failure — rely on the tool's read-back verification.
 - **Local key rotates** on re-pairing or factory reset; re-fetch it from the cloud.
 - **IP changes** break local control until re-scanned — set a DHCP reservation on your router.
-- `get_status` is always read-only. When in doubt, read first. Baseline restore requires a local snapshot tied to the configured device ID and can change the device; it is not a read-only smoke test.
+- `get_status` is always read-only. When in doubt, read first. A device in scene/music mode can be moved to white/colour using a mode-only request; requests changing DP22/23/24 are rejected until that mode is exited. Baseline restore requires a local snapshot tied to the configured device ID and can change the device; it is not a read-only smoke test.
 
 ## Setup / wiring (only if asked)
 

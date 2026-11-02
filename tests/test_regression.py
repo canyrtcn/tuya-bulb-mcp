@@ -260,6 +260,55 @@ class WizardTests(unittest.TestCase):
             self.wizard.validate_values("example123", "192.0.2.10", "3.5", KEY)
 
 
+    def test_env_quotes_and_inline_comments_both_parsers(self):
+        text = (
+            'export TUYA_BULB_DEVICE_ID="example123" # comment\n'
+            'TUYA_BULB_IP=192.0.2.10 # fixed address\n'
+            'TUYA_BULB_LOCAL_KEY="abc#efghijklmnop" # keep hash\n'
+        )
+        env = Path(self.temp.name) / ".env"
+        env.write_text(text, encoding="utf-8")
+        parsed = self.wizard.load_env(str(env))
+        self.assertEqual(parsed["TUYA_BULB_DEVICE_ID"], "example123")
+        self.assertEqual(parsed["TUYA_BULB_IP"], "192.0.2.10")
+        self.assertEqual(parsed["TUYA_BULB_LOCAL_KEY"], "abc#efghijklmnop")
+
+    def test_existing_corrupted_baseline_is_rejected(self):
+        self.baseline.write_text(
+            json.dumps({"device_id": "example123", "baseline_dps": {**DPS, "22": 99999}}),
+            encoding="utf-8",
+        )
+        with mock.patch.object(self.wizard, "BASELINE_PATH", str(self.baseline)):
+            with self.assertRaisesRegex(ValueError, "invalid datapoints"):
+                self.wizard.capture_baseline(DPS, "example123")
+        self.assertEqual(json.loads(self.baseline.read_text())["baseline_dps"]["22"], 99999)
+
+    def test_new_baseline_is_removed_if_env_save_fails(self):
+        def fake_verify(values):
+            self.baseline.write_text(json.dumps({
+                "device_id": values["TUYA_BULB_DEVICE_ID"],
+                "baseline_dps": DPS,
+            }), encoding="utf-8")
+            return True
+        inputs = iter(["example123", "192.0.2.10", "3.3", ""])
+        with mock.patch.object(self.wizard, "ENV_PATH", str(self.env)), \
+             mock.patch.object(self.wizard, "BASELINE_PATH", str(self.baseline)), \
+             mock.patch("builtins.input", side_effect=lambda *_: next(inputs)), \
+             mock.patch.object(self.wizard, "read_secret", return_value=KEY), \
+             mock.patch.object(self.wizard, "verify", side_effect=fake_verify), \
+             mock.patch.object(self.wizard, "upsert_env", side_effect=OSError("disk full")), \
+             mock.patch("sys.argv", ["setup_wizard.py"]), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.wizard.main(), 1)
+        self.assertFalse(self.baseline.exists())
+        self.assertFalse(self.env.exists())
+
+    def test_reject_loopback_and_broadcast_ip(self):
+        for ip in ("127.0.0.1", "255.255.255.255"):
+            with self.assertRaises(ValueError):
+                self.wizard.validate_values("example123", ip, "3.3", KEY)
+
+
 class ServerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -414,6 +463,114 @@ class ServerTests(unittest.TestCase):
         result = ns["tuya_bulb_set_state"](mode="wrong " + KEY)
         self.assertFalse(result["success"])
         self.assertNotIn(KEY, result["error"])
+
+
+    def test_scene_mode_can_exit_with_mode_only(self):
+        self.bulb.dps["21"] = "scene"
+        ns = self.server()
+        result = ns["tuya_bulb_set_state"](mode="white")
+        self.assertTrue(result["success"])
+        self.assertEqual(self.bulb.writes, [{"21": "white"}])
+
+    def test_scene_mode_allows_baseline_only_when_channels_match(self):
+        self.bulb.dps["21"] = "scene"
+        baseline = {"device_id": "example123", "baseline_dps": DPS}
+        (Path(self.temp.name) / "baseline_state.json").write_text(json.dumps(baseline))
+        ns = self.server()
+        result = ns["tuya_bulb_set_state"](preset="baseline")
+        self.assertTrue(result["success"])
+        self.assertEqual(self.bulb.writes, [{"21": "colour"}])
+
+    def test_scene_mode_blocks_channel_writes_even_with_baseline(self):
+        self.bulb.dps.update({"21": "scene", "22": 700})
+        baseline = {"device_id": "example123", "baseline_dps": DPS}
+        (Path(self.temp.name) / "baseline_state.json").write_text(json.dumps(baseline))
+        ns = self.server()
+        result = ns["tuya_bulb_set_state"](preset="baseline")
+        self.assertFalse(result["success"])
+        self.assertEqual(self.bulb.writes, [])
+
+    def test_get_status_success_shape(self):
+        ns = self.server()
+        result = ns["tuya_bulb_get_status"]()
+        self.assertTrue(result["success"])
+        self.assertTrue(result["read_only"])
+        self.assertEqual(result["power"], "on")
+        self.assertEqual(result["mode"], "colour")
+        self.assertEqual(result["brightness"], 500)
+        self.assertEqual(result["color_temperature"], 475)
+        self.assertEqual(self.bulb.writes, [])
+
+    def test_turn_off_already_set(self):
+        self.bulb.dps["20"] = False
+        ns = self.server()
+        result = ns["tuya_bulb_turn_off"]()
+        self.assertEqual(result["reason"], "already_set")
+        self.assertEqual(self.bulb.writes, [])
+
+    def test_white_mode_and_white_color(self):
+        ns = self.server()
+        result = ns["tuya_bulb_set_state"](color="white")
+        self.assertTrue(result["success"])
+        self.assertEqual(self.bulb.writes, [{"21": "white"}])
+
+    def test_baseline_already_set(self):
+        (Path(self.temp.name) / "baseline_state.json").write_text(
+            json.dumps({"device_id": "example123", "baseline_dps": DPS})
+        )
+        ns = self.server()
+        result = ns["tuya_bulb_set_state"](preset="baseline")
+        self.assertTrue(result["success"])
+        self.assertEqual(result["reason"], "already_set")
+        self.assertFalse(self.bulb.writes)
+
+    def test_tinytuya_network_codes_are_retryable(self):
+        class NetworkBulb(FakeBulb):
+            def status(self):
+                if not self.writes:
+                    return {"Err": "901", "Error": "Network Error: Unable to Connect"}
+                return super().status()
+        self.bulb = NetworkBulb()
+        ns = self.server()
+        with mock.patch("time.sleep"):
+            result = ns["tuya_bulb_turn_off"]()
+        self.assertTrue(result["precheck_unavailable"])
+        self.assertTrue(result["success"])
+        self.assertEqual(self.bulb.writes, [{"20": False}])
+
+    def test_protocol_errors_do_not_retry_or_write(self):
+        class ProtocolBulb(FakeBulb):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+            def status(self):
+                self.calls += 1
+                return {"Err": "914", "Error": "Check Device Key or Version"}
+        self.bulb = ProtocolBulb()
+        ns = self.server()
+        with mock.patch("time.sleep") as sleep:
+            result = ns["tuya_bulb_turn_off"]()
+        self.assertFalse(result["success"])
+        self.assertEqual(self.bulb.calls, 1)
+        self.assertEqual(self.bulb.writes, [])
+        sleep.assert_not_called()
+
+    def test_schema_errors_do_not_retry_or_write(self):
+        class SchemeBulb(FakeBulb):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+            def status(self):
+                self.calls += 1
+                return {"dps": {"1": True}}
+        self.bulb = SchemeBulb()
+        ns = self.server()
+        with mock.patch("time.sleep") as sleep:
+            result = ns["tuya_bulb_turn_off"]()
+        self.assertFalse(result["success"])
+        self.assertEqual(self.bulb.calls, 1)
+        self.assertFalse(self.bulb.writes)
+        sleep.assert_not_called()
 
 
 if __name__ == "__main__":

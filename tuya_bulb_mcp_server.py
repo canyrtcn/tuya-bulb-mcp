@@ -33,6 +33,7 @@ from typing import Annotated, Optional
 import tinytuya
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
+from tuya_config import read_env
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(PROJECT_DIR, ".env")
@@ -45,15 +46,7 @@ mcp = FastMCP("tuya-bulb", log_level="WARNING")
 
 # ------------------------------------------------------------------ config
 def _load_env(path):
-    cfg = {}
-    with open(path, "r", encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            cfg[k.strip().removeprefix("export ")] = v.strip()
-    return cfg
+    return read_env(path)
 
 
 def _load_config():
@@ -129,29 +122,50 @@ def _device():
     return d
 
 
-def _read_dps(d, attempts=2):
-    """Read-only status. Returns (dps dict or None, error string or None)."""
+def _read_dps(d, attempts=2, include_retryable=False):
+    """Read-only status. Optionally return whether failure was a transport error.
+
+    Only known transport failures can permit a power-write fallback. An
+    unsupported DP layout, protocol error, or bad key fails closed.
+    """
     last_err = None
+    retryable = False
     for attempt in range(max(1, attempts)):
+        retryable = False
         try:
             data = d.status()
+        except (OSError, TimeoutError, ConnectionError) as exc:
+            data = None
+            last_err = "%s: %s" % (type(exc).__name__, _scrub(exc))
+            retryable = True
         except Exception as exc:
             data = None
             last_err = "%s: %s" % (type(exc).__name__, _scrub(exc))
-        if isinstance(data, dict) and isinstance(data.get("dps"), dict):
-            dps = data["dps"]
-            if isinstance(dps.get("20"), bool):
-                return _sanitize(dps), None
-            last_err = "unsupported device status: expected boolean power DP20"
-        elif data is not None:
-            if isinstance(data, dict):
+        else:
+            if isinstance(data, dict) and isinstance(data.get("dps"), dict):
+                dps = data["dps"]
+                if isinstance(dps.get("20"), bool):
+                    result = (_sanitize(dps), None)
+                    return (*result, False) if include_retryable else result
+                last_err = "unsupported device status: expected boolean power DP20"
+            elif isinstance(data, dict):
+                code = str(data.get("Err", ""))
                 last_err = "status error: Err=%s Error=%s" % (
                     _scrub(data.get("Err")), _scrub(data.get("Error")))
+                # TinyTuya: ERR_CONNECT=901, ERR_TIMEOUT=902, ERR_OFFLINE=905.
+                retryable = code in ("901", "902", "905")
+            elif data is None:
+                last_err = "no status response"
+                retryable = True
             else:
                 last_err = "unexpected status response type"
-        if attempt == 0:
+
+        if not retryable:
+            break
+        if attempt < max(1, attempts) - 1:
             time.sleep(1.5)
-    return None, last_err or "no status response"
+    result = (None, last_err or "no status response")
+    return (*result, retryable) if include_retryable else result
 
 
 def _power_str(dps):
@@ -227,15 +241,10 @@ def _power_action(want_on):
         return result
 
     # Check current power first: repeat requests should not send redundant writes.
-    pre, read_error = _read_dps(d)
+    pre, read_error, retryable = _read_dps(d, include_retryable=True)
     if pre is None:
-        # A transient read failure should not permanently block a power command.
-        # Unsupported datapoints or unexpected status responses must still fail closed.
-        detail = (read_error or "").lower()
-        transient = any(term in detail for term in (
-            "timeout", "timed out", "connection", "unreachable", "no status response",
-        ))
-        if not transient:
+        # Only recognized transport failures permit a power write without a pre-read.
+        if not retryable:
             result["error"] = read_error or "current state could not be read"
             result["note"] = "NO write was sent"
             return result
@@ -424,11 +433,6 @@ def tuya_bulb_set_state(
     if not all(key in pre for key in ("20", "21", "22", "23", "24")):
         return {"success": False, "error": "Unsupported device DP scheme (requires DP20–24).",
                 "note": "NO write was sent"}
-    if pre["21"] not in ("white", "colour"):
-        return {"success": False,
-                "error": "Device is not in white/colour mode; switch mode in the app first.",
-                "note": "NO write was sent"}
-
     used_baseline = False
     desired = {}
     labels = {}
@@ -497,6 +501,16 @@ def tuya_bulb_set_state(
 
     # ---- idempotency: only write changed DPs
     writes = {dp: val for dp, val in desired.items() if pre.get(dp) != val}
+
+    # In scene/music mode the only safe exit is an explicit work-mode change.
+    # A baseline may exit scene mode if all colour/white channels already match.
+    # Reject every request that would also change DP22/23/24.
+    if pre["21"] not in ("white", "colour") and any(
+        dp in writes for dp in ("22", "23", "24")
+    ):
+        return {"success": False,
+                "error": "Scene/music mode: change work mode first, then adjust colour or brightness.",
+                "note": "NO write was sent"}
 
     refs = {}
     if used_baseline:

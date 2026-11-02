@@ -47,7 +47,7 @@ pip install -r requirements.txt
 python setup_wizard.py
 ```
 
-> **Guided alternative:** `python setup_wizard.py` (Windows: `.\.venv\Scripts\python.exe setup_wizard.py`) — prompts for device id / IP / version and the local key (hidden input), writes `.env`, and finishes with one read-only `status()` check. Add `--scan` to run a LAN scan first.
+> **Guided alternative:** `python setup_wizard.py` (Windows: `.\.venv\Scripts\python.exe setup_wizard.py`) — prompts for device id / IP / version and the local key (hidden input), performs read-only `status()` verification and baseline checks, then writes `.env` only after verification succeeds. Add `--scan` to run a LAN scan first.
 
 > If pip fails with TLS/certificate errors, resolve your certificate trust or proxy configuration rather than disabling TLS verification.
 
@@ -97,7 +97,7 @@ Result shape: `{success, changed, verified?, reason?, verification?, dps_written
 - **Connects but status times out** → wrong IP (DHCP change) or another client holding the connection; re-scan and set a DHCP reservation.
 - **`Check device key or version`** → wrong key or protocol version; confirm `3.3`/`3.4` from the scan output.
 - **Partial multi-DP ACKs** → possible on these bulbs. The server uses ACK matching or status read-back; never treat a partial ACK alone as confirmation.
-- **Mode flips to `white` after brightness/temperature writes** → expected device behaviour; use `set_state(mode="colour", ...)` or `preset="baseline"` to return. Setup while in `scene` or `music` mode is refused; switch modes using the mobile app first.
+- **Mode flips to `white` after brightness/temperature writes** → expected device behaviour; use `set_state(mode="colour", ...)` or `preset="baseline"` to return. Setup while in `scene` or `music` mode is refused; use the mobile app first. For an already-configured device in scene/music, a mode-only `set_state(mode="white")` or `set_state(mode="colour")` can exit safely; channel writes are blocked until it exits.
 
 ## Adapting to a different bulb
 

@@ -12,6 +12,8 @@ import subprocess
 import sys
 import tempfile
 
+from tuya_config import read_env
+
 BASE = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE, ".env")
 BASELINE_PATH = os.path.join(BASE, "baseline_state.json")
@@ -26,15 +28,7 @@ WRITABLE_DPS = ("20", "21", "22", "23", "24")
 
 
 def load_env(path):
-    cfg = {}
-    if os.path.exists(path):
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for raw in fh:
-                line = raw.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, value = line.split("=", 1)
-                    cfg[key.strip().removeprefix("export ")] = value.strip()
-    return cfg
+    return read_env(path) if os.path.exists(path) else {}
 
 
 def atomic_write(path, contents):
@@ -124,8 +118,9 @@ def validate_values(device_id, ip, version, key):
         address = ipaddress.ip_address(ip)
     except ValueError as exc:
         raise ValueError("Enter a valid device IPv4 address.") from exc
-    if address.version != 4 or address.is_multicast or address.is_unspecified:
-        raise ValueError("Enter a valid unicast device IPv4 address.")
+    if (address.version != 4 or address.is_multicast or address.is_unspecified
+            or address.is_loopback or address.is_reserved):
+        raise ValueError("Enter a valid unicast device IPv4 address (not loopback/broadcast).")
     if version not in ("3.3", "3.4"):
         raise ValueError("Supported protocol versions: 3.3 or 3.4.")
     if len(key) != 16 or any(c in key for c in "\r\n"):
@@ -162,6 +157,11 @@ def capture_baseline(dps, device_id):
             raise ValueError(
                 "Existing baseline belongs to a different or unidentified device. "
                 "Back it up and remove it manually before capturing a new baseline."
+            )
+        if not valid_dps({"dps": existing.get("baseline_dps")}):
+            raise ValueError(
+                "Existing baseline has invalid datapoints. Back it up and remove "
+                "it manually before capturing a new baseline."
             )
         print("[OK] Existing baseline preserved for this device.")
         return
@@ -256,12 +256,22 @@ def main():
         "TUYA_BULB_EXPECTED_DEVICE_ID": device_id if guard else "",
     }
     # Verification must pass before replacing a previously working configuration.
+    had_baseline = os.path.exists(BASELINE_PATH)
     if not args.no_verify and not verify(values):
         print("[FAIL] Existing .env configuration was left unchanged.")
         return 2
+    # A failed .env update must not leave a freshly captured baseline
+    # tied to a device different from the unchanged configuration.
+    created_baseline = not args.no_verify and not had_baseline and os.path.isfile(BASELINE_PATH)
     try:
         upsert_env(ENV_PATH, values)
     except OSError as exc:
+        if created_baseline:
+            try:
+                os.unlink(BASELINE_PATH)
+                print("[WARN] New baseline rolled back after .env failure.")
+            except OSError:
+                print("[WARN] Could not roll back new baseline; inspect it before retrying.")
         print("[FAIL] Could not update .env (%s)." % type(exc).__name__)
         return 1
     print("[OK] Configuration saved to .env.")
