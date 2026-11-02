@@ -2,6 +2,7 @@
 """Interactive, read-only setup for the local Tuya MCP server."""
 
 import argparse
+from datetime import datetime, timezone
 import getpass
 import ipaddress
 import json
@@ -32,7 +33,7 @@ def load_env(path):
                 line = raw.strip()
                 if line and not line.startswith("#") and "=" in line:
                     key, value = line.split("=", 1)
-                    cfg[key.strip()] = value.strip()
+                    cfg[key.strip().removeprefix("export ")] = value.strip()
     return cfg
 
 
@@ -45,6 +46,8 @@ def atomic_write(path, contents):
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
             fd = -1
             stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temp, path)
     finally:
         if fd >= 0:
@@ -60,6 +63,7 @@ def upsert_env(path, values):
         with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh.read().splitlines():
                 key = line.split("=", 1)[0].strip()
+                key = key.removeprefix("export ").removeprefix("# ").lstrip("#").strip()
                 if key in MANAGED_KEYS:
                     continue
                 if line.startswith("# tuya-bulb-mcp") or line.startswith("# DO NOT COMMIT"):
@@ -134,22 +138,38 @@ def valid_dps(data):
     dps = data.get("dps")
     if not isinstance(dps, dict) or not all(k in dps for k in WRITABLE_DPS):
         return False
+    colour = dps["24"]
+    if not isinstance(colour, str) or re.fullmatch(r"[0-9a-fA-F]{12}", colour) is None:
+        return False
+    hue, sat, val = (int(colour[i:i + 4], 16) for i in (0, 4, 8))
     return (
         isinstance(dps["20"], bool)
-        and isinstance(dps["21"], str)
         and dps["21"] in ("white", "colour")
-        and all(type(dps[k]) is int for k in ("22", "23"))
-        and isinstance(dps["24"], str)
-        and re.fullmatch(r"[0-9a-fA-F]{12}", dps["24"]) is not None
+        and all(type(dps[k]) is int and 0 <= dps[k] <= 1000 for k in ("22", "23"))
+        and 0 <= hue <= 360 and 0 <= sat <= 1000 and 0 <= val <= 1000
     )
 
 
-def capture_baseline(dps):
-    """Capture once; never overwrite the user's original known-good state."""
+def capture_baseline(dps, device_id):
+    """Capture once, bound to device identity; never overwrite another device."""
     if os.path.exists(BASELINE_PATH):
-        print("[OK] Existing baseline preserved.")
+        try:
+            with open(BASELINE_PATH, encoding="utf-8") as fh:
+                existing = json.load(fh)
+        except (OSError, ValueError) as exc:
+            raise ValueError("Existing baseline is unreadable; review it manually.") from exc
+        if not isinstance(existing, dict) or existing.get("device_id") != device_id:
+            raise ValueError(
+                "Existing baseline belongs to a different or unidentified device. "
+                "Back it up and remove it manually before capturing a new baseline."
+            )
+        print("[OK] Existing baseline preserved for this device.")
         return
-    snapshot = {"baseline_dps": {k: dps[k] for k in WRITABLE_DPS}}
+    snapshot = {
+        "device_id": device_id,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "baseline_dps": {k: dps[k] for k in WRITABLE_DPS},
+    }
     atomic_write(BASELINE_PATH, json.dumps(snapshot, indent=2) + "\n")
     print("[OK] Initial baseline saved locally (baseline_state.json).")
 
@@ -174,16 +194,24 @@ def verify(values):
         return False
 
     if not valid_dps(response):
-        print("[FAIL] Unsupported or incomplete device status (expected DP20–24).")
+        mode = (response.get("dps") or {}).get("21") if isinstance(response, dict) and isinstance(response.get("dps"), dict) else None
+        if mode in ("scene", "music"):
+            print("[FAIL] Device is in %s mode. Switch to white or colour mode in the app, then run setup again." % mode)
+        else:
+            print("[FAIL] Unsupported or incomplete device status (expected DP20–24).")
         return False
     dps = response["dps"]
     power = "on" if dps["20"] else "off"
     print("[OK] Device responded — power=%s mode=%s DP22=%s DP23=%s" %
           (power, dps["21"], dps["22"], dps["23"]))
     try:
-        capture_baseline(dps)
-    except OSError as exc:
-        print("[FAIL] Could not save baseline (%s)." % type(exc).__name__)
+        capture_baseline(dps, values["TUYA_BULB_DEVICE_ID"])
+    except (OSError, ValueError) as exc:
+        # Never print exception details from I/O paths that may contain secrets.
+        if isinstance(exc, ValueError):
+            print("[FAIL] %s" % str(exc))
+        else:
+            print("[FAIL] Could not save baseline (%s)." % type(exc).__name__)
         return False
     print("     (read-only check — no device writes)")
     return True
@@ -227,15 +255,16 @@ def main():
         "TUYA_BULB_LOCAL_KEY": key,
         "TUYA_BULB_EXPECTED_DEVICE_ID": device_id if guard else "",
     }
+    # Verification must pass before replacing a previously working configuration.
+    if not args.no_verify and not verify(values):
+        print("[FAIL] Existing .env configuration was left unchanged.")
+        return 2
     try:
         upsert_env(ENV_PATH, values)
     except OSError as exc:
         print("[FAIL] Could not update .env (%s)." % type(exc).__name__)
         return 1
     print("[OK] Configuration saved to .env.")
-
-    if not args.no_verify and not verify(values):
-        return 2
     if args.no_verify:
         print("[WARN] Device compatibility and baseline not checked (--no-verify).")
     print("\nMCP client command: %s" % sys.executable)

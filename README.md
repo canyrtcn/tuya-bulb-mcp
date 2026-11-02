@@ -50,11 +50,11 @@ The scan is optional. If it finds nothing, run the wizard without --scan and ent
 The wizard:
 
 1. Prompts for device details and a hidden local key.
-2. Writes a Git-ignored .env with an optional identity guard.
-3. Reads device status **without writing datapoints**, checking the DP20–24 mapping.
-4. Captures the initial state into Git-ignored baseline_state.json when no baseline exists.
+2. Reads device status **without writing datapoints**, checking the DP20–24 mapping.
+3. Captures the initial state and device identity into Git-ignored baseline_state.json if no baseline exists.
+4. Saves the Git-ignored .env with an optional identity guard **only after successful verification**.
 
-It does not overwrite an existing baseline. An incompatible or unreachable bulb fails verification. The --no-verify option skips checking and does not capture a baseline; do not use state-changing tools before confirming compatibility.
+It does not overwrite an existing baseline. A different-device or legacy baseline without an identity must be backed up and manually removed before creating a new one. An incompatible or unreachable bulb leaves the previous .env unchanged. If the bulb is in scene/music mode, switch to white/colour in the app before setup. The --no-verify option bypasses verification and still saves configuration; do not use state-changing tools before confirming compatibility.
 
 The network scan may create an ignored snapshot.json file. Avoid the separate TinyTuya wizard here because it can persist additional credentials in local files. Never share the local key in chat or version control.
 
@@ -123,7 +123,7 @@ State parameters:
 
 Examples: set_state(color="blue"), set_state(brightness=40), set_state(preset="baseline").
 
-The baseline restores the **first verified setup snapshot**, not factory defaults. If it is missing or invalid, the restore operation fails without sending writes. The device firmware may switch to white mode after brightness/temperature updates, so the server orders writes for compatible firmware.
+The baseline restores the **first verified setup snapshot for the configured device**, not factory defaults. If absent, legacy, invalid or for another device, restoration fails without writing. The device firmware may switch to white mode after brightness/temperature updates, so the server orders writes for compatible firmware.
 
 Verification uses ACK or fresh status where appropriate. An unverified write is reported as an error; no automatic recovery writes are sent. A failed sequence might have partially changed the device.
 
@@ -134,12 +134,14 @@ Verification uses ACK or fresh status where appropriate. An unverified write is 
 - Device compatibility must be checked before writing; optional identity guard prevents misconfigured targets.
 - If scanning fails, check Wi-Fi isolation and router device listings.
 - If status fails, check the key, version, IP address and supported DP scheme.
-- If baseline restore fails, complete read-only setup and verify the ignored baseline file.
+- If baseline restore fails, complete read-only setup and verify the baseline identity. Back up and manually delete an old/unidentified snapshot before recapturing.
+- Versions 3.3 and 3.4 are the validated configuration targets; other TinyTuya-supported versions require explicit compatibility work.
+- On Windows, .env inherits its directory ACLs. Keep installation in a user-only folder and review permissions on shared machines.
 - If tools are absent, check venv and client paths, MCP configuration and reload/restart.
 
 Run offline regression checks with: python -m unittest discover -s tests -v
 
-Hardware integration should be reviewed and tested separately before public release.
+Hardware integration should be reviewed and tested separately before public release; offline regression tests use fake devices only.
 
 ## Project layout
 

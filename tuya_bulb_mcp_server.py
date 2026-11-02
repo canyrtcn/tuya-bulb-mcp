@@ -38,8 +38,6 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(PROJECT_DIR, ".env")
 BASELINE_PATH = os.path.join(PROJECT_DIR, "baseline_state.json")
 
-# Optional hard guard (env only, never committed): refuse to start unless
-# TUYA_BULB_DEVICE_ID matches this value (protects against a wrong .env).
 WRITE_DP = 20  # power datapoint (turn_on/off)
 
 mcp = FastMCP("tuya-bulb", log_level="WARNING")
@@ -54,7 +52,7 @@ def _load_env(path):
             if not line or line.startswith("#") or "=" not in line:
                 continue
             k, v = line.split("=", 1)
-            cfg[k.strip()] = v.strip()
+            cfg[k.strip().removeprefix("export ")] = v.strip()
     return cfg
 
 
@@ -82,6 +80,8 @@ def _load_config():
             "tuya-bulb MCP: TUYA_BULB_DEVICE_ID does not match "
             "TUYA_BULB_EXPECTED_DEVICE_ID; refusing to start."
         )
+    if ver not in ("3.3", "3.4"):
+        raise SystemExit("tuya-bulb MCP: unsupported protocol version (use 3.3 or 3.4).")
     return {"id": dev_id, "ip": ip, "ver": float(ver), "key": key}
 
 
@@ -229,10 +229,18 @@ def _power_action(want_on):
     # Check current power first: repeat requests should not send redundant writes.
     pre, read_error = _read_dps(d)
     if pre is None:
-        result["error"] = read_error or "current state could not be read"
-        result["note"] = "NO write was sent"
-        return result
-    if pre.get("20") == wanted:
+        # A transient read failure should not permanently block a power command.
+        # Unsupported datapoints or unexpected status responses must still fail closed.
+        detail = (read_error or "").lower()
+        transient = any(term in detail for term in (
+            "timeout", "timed out", "connection", "unreachable", "no status response",
+        ))
+        if not transient:
+            result["error"] = read_error or "current state could not be read"
+            result["note"] = "NO write was sent"
+            return result
+        result["precheck_unavailable"] = True
+    if pre is not None and pre.get("20") == wanted:
         result.update({"success": True, "changed": False, "reason": "already_set",
                        "verified": True, "power": "on" if wanted else "off"})
         result.pop("write")
@@ -306,17 +314,21 @@ def _load_baseline():
         raise ValueError(
             "Baseline is unavailable; run setup_wizard.py to capture it."
         ) from exc
-    dps = data.get("baseline_dps") if isinstance(data, dict) else None
+    if not isinstance(data, dict) or data.get("device_id") != CFG["id"]:
+        raise ValueError("Baseline device identity is missing or does not match; refusing to restore.")
+    dps = data.get("baseline_dps")
     keys = ("20", "21", "22", "23", "24")
     if not isinstance(dps, dict) or not all(key in dps for key in keys):
         raise ValueError("Invalid baseline: expected DP20–24.")
+    colour = _decode_colour(dps["24"])
     if (not isinstance(dps["20"], bool)
             or dps["21"] not in ("white", "colour")
-            or type(dps["22"]) is not int
-            or type(dps["23"]) is not int
-            or not isinstance(dps["24"], str)
-            or _decode_colour(dps["24"]) is None):
-        raise ValueError("Invalid baseline: unsupported datapoint types.")
+            or any(type(dps[key]) is not int or not 0 <= dps[key] <= 1000 for key in ("22", "23"))
+            or colour is None
+            or not 0 <= colour["hue"] <= 360
+            or not 0 <= colour["saturation"] <= 1000
+            or not 0 <= colour["value"] <= 1000):
+        raise ValueError("Invalid baseline: unsupported datapoint types or ranges.")
     return {key: dps[key] for key in keys}
 
 # Named colours -> (hue 0-360, saturation 0-1000). English names only.
@@ -411,6 +423,10 @@ def tuya_bulb_set_state(
                 "note": "NO write was sent"}
     if not all(key in pre for key in ("20", "21", "22", "23", "24")):
         return {"success": False, "error": "Unsupported device DP scheme (requires DP20–24).",
+                "note": "NO write was sent"}
+    if pre["21"] not in ("white", "colour"):
+        return {"success": False,
+                "error": "Device is not in white/colour mode; switch mode in the app first.",
                 "note": "NO write was sent"}
 
     used_baseline = False

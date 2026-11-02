@@ -18,37 +18,32 @@ Read this file fully before doing anything. Follow the rules; do not improvise a
 ### Windows (PowerShell)
 
 ```powershell
-git clone <repo-url> tuya-bulb-mcp
+git clone https://github.com/canyrtcn/tuya-bulb-mcp.git
 cd tuya-bulb-mcp
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-Copy-Item .env.example .env
-.\.venv\Scripts\python.exe -m tinytuya scan 25 -nocolor -yes   # device id / IP / version (or use setup_wizard.py --scan)
-# user fills .env (device id, IP, version, local key; optional TUYA_BULB_EXPECTED_DEVICE_ID hard guard), then:
-.\.venv\Scripts\python.exe setup_wizard.py                 # read-only check
+.\.venv\Scripts\python.exe setup_wizard.py --scan    # optional LAN discovery + read-only check
 ```
 
 ### Linux
 
 ```bash
-git clone <repo-url> tuya-bulb-mcp
+git clone https://github.com/canyrtcn/tuya-bulb-mcp.git
 cd tuya-bulb-mcp
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
 python setup_wizard.py   # fill .env + read-only check (use --scan first if needed)
 ```
 
 ### macOS
 
 ```bash
-git clone <repo-url> tuya-bulb-mcp
+git clone https://github.com/canyrtcn/tuya-bulb-mcp.git
 cd tuya-bulb-mcp
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
 python setup_wizard.py
 ```
 
@@ -59,7 +54,7 @@ python setup_wizard.py
 ## Verify before trusting
 
 1. `.env` is filled (device id / IP / version / local key).
-2. Read-only check passes: `setup_wizard.py` prints `[OK] Device responded` for a compatible DP20–24 response. An initial baseline is captured locally (unless one already exists).
+2. Read-only verification confirms DP20–24 and captures a device-bound baseline if none exists. Older baselines lacking a device ID require manual review, backup, and removal; mismatches are refused.
 3. Only then wire the MCP server into the client.
 
 ## Agent skill
@@ -86,7 +81,7 @@ After registering, reload/restart the client and confirm discovery shows **exact
 | Tool | Behaviour |
 |---|---|
 | `get_status()` | Read-only summary: `power`, `mode`, `brightness` (DP22), `color_temperature` (DP23), `color` (`raw` + decoded HSV), `raw_dps`. |
-| `turn_on()` / `turn_off()` | Single DP20 write + read-back verification. |
+| `turn_on()` / `turn_off()` | Write DP20 only if needed; transient status failures may still allow a verified power write. |
 | `set_state(mode?, color?, hue?, saturation?, value?, brightness?, temperature?, preset?)` | Idempotent: returns `already_set` with no write when nothing changes. Ordered writes: white-ops (22/23) first, colour-ops (21/24) last, because this bulb family auto-switches to `white` mode on bright/temp writes; multi-DP ACKs are partial. Verification = write-ack, else at most one read-back. `preset="baseline"` restores the captured baseline. |
 
 Result shape: `{success, changed, verified?, reason?, verification?, dps_written?, state?}`.
@@ -102,15 +97,15 @@ Result shape: `{success, changed, verified?, reason?, verification?, dps_written
 - **Connects but status times out** → wrong IP (DHCP change) or another client holding the connection; re-scan and set a DHCP reservation.
 - **`Check device key or version`** → wrong key or protocol version; confirm `3.3`/`3.4` from the scan output.
 - **Partial multi-DP ACKs** → possible on these bulbs. The server uses ACK matching or status read-back; never treat a partial ACK alone as confirmation.
-- **Mode flips to `white` after brightness/temperature writes** → expected device behaviour; use `set_state(mode="colour", ...)` or `preset="baseline"` to return.
+- **Mode flips to `white` after brightness/temperature writes** → expected device behaviour; use `set_state(mode="colour", ...)` or `preset="baseline"` to return. Setup while in `scene` or `music` mode is refused; switch modes using the mobile app first.
 
 ## Adapting to a different bulb
 
 DP numbers and value scales vary between Tuya firmwares. The constants live in `tuya_bulb_mcp_server.py`:
 
-- `EXPECTED_DEVICE_ID` — optional hard guard (must match `.env`)
+- `TUYA_BULB_EXPECTED_DEVICE_ID` — optional identity guard in `.env` or environment
 - `WRITE_DP` — power datapoint (20 here)
-- `baseline_state.json` — local, Git-ignored snapshot captured on the first successful wizard verification; do not hardcode sample values in the server
+- `baseline_state.json` — Git-ignored snapshot bound to the verified device identity; a missing/mismatched/legacy identity blocks restore, never falling back to examples
 - `_NAMED_COLOURS`, `_scale10` — colour hue table and percentage → 0–1000 scaling
 
 Change them deliberately, verify read-only first, and only then allow writes.

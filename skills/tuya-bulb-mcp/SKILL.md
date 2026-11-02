@@ -47,7 +47,7 @@ Only enter terminal/debug/fallback flow if the direct MCP call actually fails or
 | Tool | Behaviour |
 |---|---|
 | `get_status()` | Read-only summary: `power`, `mode`, `brightness` (DP22), `color_temperature` (DP23), `color` (`raw` + decoded HSV), `raw_dps`. |
-| `turn_on()` / `turn_off()` | Single DP20 write + read-back verification. |
+| `turn_on()` / `turn_off()` | Write DP20 only if required, and verify via status read-back. |
 | `set_state(mode?, color?, hue?, saturation?, value?, brightness?, temperature?, preset?)` | Idempotent state change. Returns `already_set` (no write) when nothing changes. `preset="baseline"` restores the captured baseline. |
 
 Result shape: `{success, changed, verified?, reason?, verification?, dps_written?, state?}`.
@@ -67,7 +67,7 @@ Result shape: `{success, changed, verified?, reason?, verification?, dps_written
 - **Multi-DP ACKs are partial** (often only the first dp is echoed). Never treat a partial ACK alone as failure — rely on the tool's read-back verification.
 - **Local key rotates** on re-pairing or factory reset; re-fetch it from the cloud.
 - **IP changes** break local control until re-scanned — set a DHCP reservation on your router.
-- `get_status` is always read-only. When in doubt, read first. The baseline preset changes the device when its current state differs from the locally captured snapshot; it is not a read-only smoke test.
+- `get_status` is always read-only. When in doubt, read first. Baseline restore requires a local snapshot tied to the configured device ID and can change the device; it is not a read-only smoke test.
 
 ## Setup / wiring (only if asked)
 

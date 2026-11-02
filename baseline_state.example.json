@@ -1,5 +1,7 @@
 {
-  "_note": "Example format only. Setup captures actual state in gitignored baseline_state.json; never use these sample values as a restore target.",
+  "_note": "Example format only. The setup wizard writes a Git-ignored, device-bound baseline. This is NOT a live restore target.",
+  "device_id": "YOUR_DEVICE_ID",
+  "captured_at": "2026-01-01T00:00:00+00:00",
   "baseline_dps": {
     "20": true,
     "21": "white",
