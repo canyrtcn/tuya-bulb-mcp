@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "title": "Tuya bulb — known-good baseline state (TEMPLATE)",
+    "status": "KNOWN-GOOD BASELINE — NOT FACTORY DEFAULT",
+    "description": "Template only. Copy to baseline_state.json (gitignored) and fill in YOUR bulb's state, captured with get_status BEFORE the first write. This is a pre-write restore reference, not a factory preset.",
+    "captured_via": "tinytuya BulbDevice.status() — read-only",
+    "device": {
+      "name": "Tuya bulb",
+      "device_id": "YOUR_DEVICE_ID",
+      "ip": "192.168.1.100",
+      "protocol_version": "3.3",
+      "product_key": "YOUR_PRODUCT_KEY",
+      "dp_scheme": "light_ty (20-26)"
+    },
+    "scope_note": "DP25 (scene_data), DP26 (countdown) and DP34 (unknown flag) are outside this baseline and must not be modified.",
+    "restore_hint": "Apply in this order: 21 (work_mode) -> 24 (colour_data) -> 22 -> 23 -> 20 (power last)."
+  },
+  "baseline_dps": {
+    "20": { "name": "switch_led",   "label": "power",             "type": "bool",   "value": true },
+    "21": { "name": "work_mode",    "label": "work_mode",         "type": "string", "value": "colour" },
+    "22": { "name": "bright_value", "label": "brightness",        "type": "int",    "value": 500 },
+    "23": { "name": "temp_value",   "label": "color_temperature", "type": "int",    "value": 475 },
+    "24": { "name": "colour_data",  "label": "colour_data",       "type": "string", "value": "000003e803e8" }
+  }
+}
