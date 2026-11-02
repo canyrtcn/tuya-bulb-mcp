@@ -2,7 +2,7 @@
 
 Local MCP server for Tuya / Smart Life Wi-Fi lighting. Connect an MCP-compatible AI client to a bulb directly over your local network with [TinyTuya](https://github.com/jasonacox/tinytuya). No Tuya Cloud calls are needed at runtime.
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE) ![MCP: stdio](https://img.shields.io/badge/MCP-stdio-blue)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE) ![MCP: stdio](https://img.shields.io/badge/MCP-stdio-blue) ![TinyTuya](https://img.shields.io/badge/TinyTuya-1.20-00A98F) ![Cloud](https://img.shields.io/badge/cloud-not%20required-success) ![Scope](https://img.shields.io/badge/scope-one%20device-orange) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 
 ## Features
 
@@ -26,6 +26,14 @@ The local key can be obtained through the [Tuya IoT Platform](https://iot.tuya.c
 **Before starting:** Keep the bulb powered and reachable on the same LAN, and have its device ID and 16-character local key available. Do not paste the key into chat, a GitHub issue or a client MCP configuration.
 
 ## Quick start
+
+**First-time setup, in order:**
+
+1. Pair your compatible bulb in the Smart Life / Tuya app and keep it reachable on the same LAN.
+2. Obtain its **device ID and 16-character local key** from the linked [Tuya IoT project](https://iot.tuya.com). The optional LAN scan can help find its IP and protocol version.
+3. Run the commands for your OS below. The setup wizard asks for the device details and verifies the bulb **read-only** before saving local configuration.
+4. Add the MCP server to your AI client's configuration using the example in [MCP client integration](#mcp-client-integration), then connect or reload that client.
+5. Ask the connected assistant for the bulb's status first; see [First-use examples](#first-use-examples).
 
 **Windows (PowerShell):**
 
@@ -101,7 +109,22 @@ Use the venv `bin/python` on Linux/macOS. In Hermes, run `/reload-mcp` after cha
 }
 ~~~
 
-Replace example paths with your actual Python and server locations. Do not place device credentials in the client configuration.
+Replace example paths with your actual Python and server locations. Do not place device credentials in the client configuration. The optional [agent skill](skills/tuya-bulb-mcp/SKILL.md) helps compatible agents select tools directly, but is **not required** to use the MCP server.
+
+### First-use examples
+
+After your MCP client detects the four tools, try these requests **in the AI client chat** (not in PowerShell):
+
+| What you say | What the MCP server does |
+|---|---|
+| "What's the current bulb status?" | Calls `get_status` (read-only) |
+| "Turn on the bulb." / "Turn off the bulb." | Calls `turn_on` / `turn_off` |
+| "Set the bulb to blue." | Uses `set_state(color="blue")` |
+| "Set brightness to 40%." | Uses `set_state(brightness=40)` |
+| "Set the colour temperature to 70%." | Uses `set_state(temperature=70)` |
+| "Restore the saved baseline." | Uses `set_state(preset="baseline")` |
+
+The baseline is the first verified setup snapshot, **not** a factory reset; restoring it can change the light. The specific AI client decides how to translate chat requests into MCP tool calls.
 
 ## Tools
 
