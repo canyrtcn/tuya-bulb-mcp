@@ -160,7 +160,7 @@ After installing dependencies into the virtual environment, run:
 .venv/bin/python -m unittest discover -s tests -v
 ~~~
 
-These tests use simulated devices and do not control a real bulb. The CI workflow runs them on Windows and Ubuntu using Python 3.10 and 3.12. Passing offline tests does not guarantee compatibility with every bulb; perform a controlled, read-only device check before any hardware writes.
+These tests use simulated devices and do not control a real bulb. The [CI workflow](https://github.com/canyrtcn/tuya-bulb-mcp/actions) runs them on Windows and Ubuntu using Python 3.10 and 3.12. Passing offline tests does not guarantee compatibility with every bulb; perform a controlled, read-only device check before any hardware writes.
 
 ## Project layout
 
