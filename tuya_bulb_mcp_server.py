@@ -25,6 +25,7 @@ Run (spawned automatically once registered in the MCP client):
   .venv\\Scripts\\python.exe tuya_bulb_mcp_server.py
 """
 
+import json
 import os
 import time
 from typing import Annotated, Optional
@@ -35,10 +36,10 @@ from pydantic import Field
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(PROJECT_DIR, ".env")
+BASELINE_PATH = os.path.join(PROJECT_DIR, "baseline_state.json")
 
 # Optional hard guard (env only, never committed): refuse to start unless
 # TUYA_BULB_DEVICE_ID matches this value (protects against a wrong .env).
-EXPECTED_DEVICE_ID = os.environ.get("TUYA_BULB_EXPECTED_DEVICE_ID", "").strip()
 WRITE_DP = 20  # power datapoint (turn_on/off)
 
 mcp = FastMCP("tuya-bulb", log_level="WARNING")
@@ -74,7 +75,9 @@ def _load_config():
     missing = [k for k, v in zip(needed_new, (dev_id, ip, ver, key)) if not v]
     if missing:
         raise SystemExit("tuya-bulb MCP: missing .env field(s): %s" % ", ".join(missing))
-    if EXPECTED_DEVICE_ID and dev_id != EXPECTED_DEVICE_ID:
+    expected_id = (os.environ.get("TUYA_BULB_EXPECTED_DEVICE_ID") or
+                   cfg.get("TUYA_BULB_EXPECTED_DEVICE_ID", "")).strip()
+    if expected_id and dev_id != expected_id:
         raise SystemExit(
             "tuya-bulb MCP: TUYA_BULB_DEVICE_ID does not match "
             "TUYA_BULB_EXPECTED_DEVICE_ID; refusing to start."
@@ -135,11 +138,17 @@ def _read_dps(d, attempts=2):
         except Exception as exc:
             data = None
             last_err = "%s: %s" % (type(exc).__name__, _scrub(exc))
-        if isinstance(data, dict) and "dps" in data:
-            return _sanitize(data.get("dps") or {}), None
-        if data is not None and last_err is None:
-            last_err = "status error: Err=%s Error=%s" % (
-                _scrub(data.get("Err")), _scrub(data.get("Error")))
+        if isinstance(data, dict) and isinstance(data.get("dps"), dict):
+            dps = data["dps"]
+            if isinstance(dps.get("20"), bool):
+                return _sanitize(dps), None
+            last_err = "unsupported device status: expected boolean power DP20"
+        elif data is not None:
+            if isinstance(data, dict):
+                last_err = "status error: Err=%s Error=%s" % (
+                    _scrub(data.get("Err")), _scrub(data.get("Error")))
+            else:
+                last_err = "unexpected status response type"
         if attempt == 0:
             time.sleep(1.5)
     return None, last_err or "no status response"
@@ -217,6 +226,18 @@ def _power_action(want_on):
         result["note"] = "device handle could not be created; NO write was sent"
         return result
 
+    # Check current power first: repeat requests should not send redundant writes.
+    pre, read_error = _read_dps(d)
+    if pre is None:
+        result["error"] = read_error or "current state could not be read"
+        result["note"] = "NO write was sent"
+        return result
+    if pre.get("20") == wanted:
+        result.update({"success": True, "changed": False, "reason": "already_set",
+                       "verified": True, "power": "on" if wanted else "off"})
+        result.pop("write")
+        return result
+
     # Single write: DP20 only
     try:
         ack = d.set_value(WRITE_DP, wanted)
@@ -238,6 +259,7 @@ def _power_action(want_on):
 
     if result["verified"]:
         result["success"] = True
+        result["changed"] = True
         result["note"] = ("only DP20 was written; verified with an independent "
                           "status() call; DP21-34 untouched")
     else:
@@ -273,17 +295,29 @@ def tuya_bulb_turn_off() -> dict:
 
 
 # ------------------------------------------------------------------ set_state
-# Baseline source: baseline_state.json — a "known-good pre-write baseline"
-# captured with a read-only status() BEFORE the first write (NOT a factory
-# preset). The values below are EXAMPLE defaults; replace them with your own
-# capture (or provide TUYA_BULB_BASELINE_* / baseline_state.json handling).
-BASELINE_DP = {
-    "20": True,
-    "21": "colour",
-    "22": 500,
-    "23": 475,
-    "24": "000003e803e8",
-}
+# A local baseline is captured by setup_wizard.py during read-only setup.
+# Never fall back to example values: incorrect fallback would write an
+# unrelated state to the bulb. The file is deliberately gitignored.
+def _load_baseline():
+    try:
+        with open(BASELINE_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            "Baseline is unavailable; run setup_wizard.py to capture it."
+        ) from exc
+    dps = data.get("baseline_dps") if isinstance(data, dict) else None
+    keys = ("20", "21", "22", "23", "24")
+    if not isinstance(dps, dict) or not all(key in dps for key in keys):
+        raise ValueError("Invalid baseline: expected DP20–24.")
+    if (not isinstance(dps["20"], bool)
+            or dps["21"] not in ("white", "colour")
+            or type(dps["22"]) is not int
+            or type(dps["23"]) is not int
+            or not isinstance(dps["24"], str)
+            or _decode_colour(dps["24"]) is None):
+        raise ValueError("Invalid baseline: unsupported datapoint types.")
+    return {key: dps[key] for key in keys}
 
 # Named colours -> (hue 0-360, saturation 0-1000). English names only.
 _NAMED_COLOURS = {
@@ -355,11 +389,11 @@ def tuya_bulb_set_state(
     """Short state change: idempotent, minimal writes + at most 1 read-back."""
     preset_n = _norm_key(preset) if preset is not None else None
     if preset is not None and preset_n != "baseline":
-        return {"success": False, "error": "Invalid preset: %r (supported: 'baseline')" % preset}
+        return {"success": False, "error": _scrub("Invalid preset: %r (supported: 'baseline')" % preset)}
 
     mode_n = _norm_key(mode) if mode is not None else None
     if mode is not None and mode_n not in ("white", "colour", "color"):
-        return {"success": False, "error": "Invalid mode: %r (supported: 'white', 'colour')" % mode}
+        return {"success": False, "error": _scrub("Invalid mode: %r (supported: 'white', 'colour')" % mode)}
 
     if all(v is None for v in (mode, color, hue, saturation, value, brightness, temperature, preset)):
         return {"success": False,
@@ -375,14 +409,20 @@ def tuya_bulb_set_state(
     if pre is None:
         return {"success": False, "error": "Current state could not be read (%s)" % perr,
                 "note": "NO write was sent"}
+    if not all(key in pre for key in ("20", "21", "22", "23", "24")):
+        return {"success": False, "error": "Unsupported device DP scheme (requires DP20–24).",
+                "note": "NO write was sent"}
 
     used_baseline = False
     desired = {}
     labels = {}
 
     if preset_n == "baseline":
+        try:
+            desired.update(_load_baseline())
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "note": "NO write was sent"}
         used_baseline = True
-        desired.update(BASELINE_DP)
         labels["preset"] = "baseline"
 
     if mode_n is not None:
@@ -400,8 +440,8 @@ def tuya_bulb_set_state(
             entry = _NAMED_COLOURS.get(cn)
             if entry is None:
                 return {"success": False,
-                        "error": "Unknown colour: %r (supported: %s)"
-                                 % (color, ", ".join(sorted(set(_NAMED_COLOURS))))}
+                        "error": _scrub("Unknown colour: %r (supported: %s)"
+                                        % (color, ", ".join(sorted(set(_NAMED_COLOURS)))))}
             h, s = entry
             if hue is not None:
                 h = int(hue)
@@ -477,16 +517,20 @@ def tuya_bulb_set_state(
 
     # ---- write commands (at most 2: white-ops first, then colour-ops)
     last_ack = None
+    completed = {}
+    attempted = {}
     try:
-        for cmd in commands:
+        for index, cmd in enumerate(commands):
+            attempted.update(cmd)
             last_ack = d.set_multiple_values(cmd)
-            if len(commands) > 1:
+            completed.update(cmd)
+            if index < len(commands) - 1:
                 time.sleep(0.2)
     except Exception as exc:
         return {"success": False,
                 "error": _scrub("%s: %s" % (type(exc).__name__, exc)),
                 "note": "write failed; NO further write attempted (no recovery)",
-                "dps_written": all_written}
+                "dps_attempted": attempted, "dps_completed": completed}
 
     # ---- verification: single-command write-ack first, else at most 1 read-back
     verified = False

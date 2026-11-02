@@ -57,7 +57,7 @@ Result shape: `{success, changed, verified?, reason?, verification?, dps_written
 - One device only — the target comes from `.env`. No device-id parameters, no generic datapoint tools.
 - Writes are limited to DP20–24 (`20` power, `21` work_mode, `22` bright_value, `23` temp_value, `24` colour_data). **Never write DP25 / DP26 / DP34.**
 - The local key lives ONLY in `.env` (gitignored). Never print it, log it, or commit it. Never create `tinytuya.json` / `devices.json` (they persist secrets).
-- Verify writes with a status read-back (the tools already do this). Report failures honestly; do not retry blindly.
+- Verify writes: power actions use status read-back, while state changes use matching ACK or status read-back. Do not retry blindly.
 - Do not use `python -m tinytuya wizard` for key retrieval — fetch the local key from the Tuya IoT Cloud device details instead.
 
 ## Pitfalls
@@ -67,7 +67,7 @@ Result shape: `{success, changed, verified?, reason?, verification?, dps_written
 - **Multi-DP ACKs are partial** (often only the first dp is echoed). Never treat a partial ACK alone as failure — rely on the tool's read-back verification.
 - **Local key rotates** on re-pairing or factory reset; re-fetch it from the cloud.
 - **IP changes** break local control until re-scanned — set a DHCP reservation on your router.
-- `get_status` is always safe (read-only). When in doubt, read first.
+- `get_status` is always read-only. When in doubt, read first. The baseline preset changes the device when its current state differs from the locally captured snapshot; it is not a read-only smoke test.
 
 ## Setup / wiring (only if asked)
 

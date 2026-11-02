@@ -10,7 +10,7 @@ Read this file fully before doing anything. Follow the rules; do not improvise a
 2. **One device only:** the server controls exactly the device configured in `TUYA_BULB_DEVICE_ID`. Do NOT add device-selection parameters and do NOT add any generic "datapoint write" / "any device" tool.
 3. **Writes are limited to DP20–24:** `20` power (bool), `21` work_mode, `22` bright_value, `23` temp_value, `24` colour_data. **DP25 / DP26 / DP34 must never be written.**
 4. **Do not guess DP numbers or value formats.** Run `get_status` first. If the bulb uses a different scheme (e.g. the common 1–5 mapping), adjust the DP map deliberately inside `tuya_bulb_mcp_server.py` and re-verify **read-only** before any write.
-5. **Verify every write with a status read-back.** The tools already do this; report failures honestly and do not retry blindly.
+5. **Verify every write.** Power writes use status read-back; state changes accept matching ACK or read-back. Report failures honestly and do not retry blindly.
 6. **Do not use `python -m tinytuya wizard` in this project's flow** — it persists credentials to disk. The local key is a one-time fetch from the user's Tuya IoT Cloud project (Cloud → link Smart Life app account → device local key).
 
 ## Setup (repeatable, ~5 minutes)
@@ -54,13 +54,12 @@ python setup_wizard.py
 
 > **Guided alternative:** `python setup_wizard.py` (Windows: `.\.venv\Scripts\python.exe setup_wizard.py`) — prompts for device id / IP / version and the local key (hidden input), writes `.env`, and finishes with one read-only `status()` check. Add `--scan` to run a LAN scan first.
 
-> If `pip` fails with TLS/certificate errors (corporate proxy or TLS-inspecting antivirus), retry with:
-> `--trusted-host pypi.org --trusted-host files.pythonhosted.org`
+> If pip fails with TLS/certificate errors, resolve your certificate trust or proxy configuration rather than disabling TLS verification.
 
 ## Verify before trusting
 
 1. `.env` is filled (device id / IP / version / local key).
-2. Read-only check passes: `setup_wizard.py` prints `[OK] Device responded` (one `status()` call, no writes) — note the values of DPs `20/21/22/23/24`.
+2. Read-only check passes: `setup_wizard.py` prints `[OK] Device responded` for a compatible DP20–24 response. An initial baseline is captured locally (unless one already exists).
 3. Only then wire the MCP server into the client.
 
 ## Agent skill
@@ -94,7 +93,7 @@ Result shape: `{success, changed, verified?, reason?, verification?, dps_written
 
 ## Safe write test (user's bulb only)
 
-- `set_state(preset="baseline")` on a bulb already at baseline must return `{"success": true, "changed": false, "reason": "already_set"}` — proves connectivity without moving the device.
+- For a no-write connectivity check, use `get_status()`. Baseline restoration may change the device; only invoke it when the captured local state is the desired target.
 - Power cycle: `turn_off` → verify `power` flips to `off` → `turn_on` → verify `on`. Leave the bulb as you found it.
 
 ## Troubleshooting
@@ -102,7 +101,7 @@ Result shape: `{success, changed, verified?, reason?, verification?, dps_written
 - **`DEVICE KEY required` in scan** → local key missing/wrong; re-fetch from the cloud (re-pairing or factory reset rotates the key).
 - **Connects but status times out** → wrong IP (DHCP change) or another client holding the connection; re-scan and set a DHCP reservation.
 - **`Check device key or version`** → wrong key or protocol version; confirm `3.3`/`3.4` from the scan output.
-- **Partial multi-DP ACKs** → normal on these bulbs (often only the first dp is echoed). The server falls back to one read-back; never treat a partial ACK alone as failure.
+- **Partial multi-DP ACKs** → possible on these bulbs. The server uses ACK matching or status read-back; never treat a partial ACK alone as confirmation.
 - **Mode flips to `white` after brightness/temperature writes** → expected device behaviour; use `set_state(mode="colour", ...)` or `preset="baseline"` to return.
 
 ## Adapting to a different bulb
@@ -111,7 +110,7 @@ DP numbers and value scales vary between Tuya firmwares. The constants live in `
 
 - `EXPECTED_DEVICE_ID` — optional hard guard (must match `.env`)
 - `WRITE_DP` — power datapoint (20 here)
-- `BASELINE_DP` — captured pre-write baseline (replace with your own capture)
+- `baseline_state.json` — local, Git-ignored snapshot captured on the first successful wizard verification; do not hardcode sample values in the server
 - `_NAMED_COLOURS`, `_scale10` — colour hue table and percentage → 0–1000 scaling
 
 Change them deliberately, verify read-only first, and only then allow writes.

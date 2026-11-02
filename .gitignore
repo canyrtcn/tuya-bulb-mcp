@@ -1,29 +1,32 @@
-# --- Secrets (NEVER commit) ---
+# Local configuration and credentials
 .env
+.env.*
+!.env.example
 devices.json
 snapshot.json
 tinytuya.json
 tuya-credentials.json
+tuya-raw.json
 *.key
 *.pem
 
-# --- Local device state / personal data ---
+# Local device state
 baseline_state.json
 
-# --- Local-only helpers (machine-specific constants, personal workflow) ---
+# Local helpers and backups
 get_local_key.py
 check_status.py
 power_test.py
 set_white.py
 verify_mcp_tools.py
-
-# --- Local backups & vendor reference dumps ---
 _backups/
 *.bak
 .tinytuya_readme.md
 
-# --- Python / venv ---
+# Python and virtual environments
 .venv/
+venv/
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
 *.log
